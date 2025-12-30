@@ -59,15 +59,15 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/aegis_db')
   .then(() => console.log("✅ AEGIS Database Online"))
   .catch(err => console.error("❌ DB Error:", err));
 
-// --- HELPER FUNCTION TO CLEAN JSON FROM AI RESPONSE ---
+
 function cleanAIResponse(text) {
-  // Remove markdown code blocks
+  
   let cleaned = text.replace(/``````\n?/g, '');
   
   // Remove any leading/trailing whitespace
   cleaned = cleaned.trim();
   
-  // Try to find JSON object if there's extra text
+ 
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     cleaned = jsonMatch[0];
@@ -76,9 +76,7 @@ function cleanAIResponse(text) {
   return cleaned;
 }
 
-// --- ROUTES ---
 
-// 1. AI ANALYSIS - IMPROVED PROMPT
 app.post('/api/analyze', async (req, res) => {
   try {
     const { imageBase64, promptContext, taskType } = req.body;
@@ -171,9 +169,9 @@ IMPORTANT: Return ONLY the JSON object, no markdown formatting, no code blocks, 
   }
 });
 
-// 2. GENERATE OVERALL REPORT - FIXED
+
 app.post('/api/generate-report', async (req, res) => {
-  const { incidents } = req.body; // Move to outer scope
+  const { incidents } = req.body; 
   
   try {
     if (!incidents || incidents.length === 0) {
@@ -184,7 +182,7 @@ app.post('/api/generate-report', async (req, res) => {
       });
     }
 
-    // Create a summary of incidents for the prompt
+  
     const incidentSummary = incidents.map(inc => ({
       zone: inc.location?.name || 'Unknown',
       risk: inc.riskLevel,
@@ -239,8 +237,8 @@ Return ONLY valid JSON without markdown code blocks or formatting. The JSON must
     const rawText = result.response.text();
     const cleanedText = cleanAIResponse(rawText);
     
-    console.log("📊 Raw Report Response:", rawText.substring(0, 200) + "...");
-    console.log("🧹 Cleaned Report:", cleanedText.substring(0, 200) + "...");
+    console.log("Raw Report Response:", rawText.substring(0, 200) + "...");
+    console.log(" Cleaned Report:", cleanedText.substring(0, 200) + "...");
     
     try {
       const report = JSON.parse(cleanedText);
@@ -249,14 +247,14 @@ Return ONLY valid JSON without markdown code blocks or formatting. The JSON must
       console.error("Report JSON Parse Error:", parseError);
       console.error("Cleaned Text:", cleanedText);
       
-      // Fallback report
-      throw parseError; // Will be caught by outer catch
+     
+      throw parseError; 
     }
     
   } catch (error) {
     console.error("Report Generation Error:", error);
     
-    // Fallback report using the incidents variable (now in scope)
+   
     res.json({
       executiveSummary: `Report generation encountered an error. ${incidents.length} active incidents detected across venue requiring manual assessment.`,
       zoneAnalysis: incidents.map(inc => ({
@@ -353,12 +351,12 @@ app.post('/api/reset', async (req, res) => {
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
-  console.log('✅ Client connected:', socket.id);
+  console.log('Client connected:', socket.id);
   
   socket.on('disconnect', () => {
-    console.log('❌ Client disconnected:', socket.id);
+    console.log('Client disconnected:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`🚀 Aegis Backend Active on Port ${PORT}`));
+server.listen(PORT, () => console.log(`Aegis Backend Active on Port ${PORT}`));
