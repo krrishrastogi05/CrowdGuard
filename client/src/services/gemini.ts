@@ -1,4 +1,5 @@
-export const API_URL = 'http://localhost:3001';
+
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export async function analyzeScenario(file: File | null, context: string) {
   let imageBase64 = null;
@@ -19,14 +20,14 @@ export async function analyzeScenario(file: File | null, context: string) {
 }
 
 export async function generateAdvisoryText(incident: any) {
-    const res = await fetch(`${API_URL}/api/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-          promptContext: `Generate a short public safety tweet for: ${incident.description}. Risk: ${incident.riskLevel}`,
-          taskType: 'ADVISORY' 
-      })
-    });
-    const data = await res.json();
-    return data.description || data.text || "Attention: Please remain calm and follow staff instructions.";
+  const res = await fetch(`${API_URL}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      promptContext: `Generate a short public safety tweet for: ${incident.description}. Risk: ${incident.riskLevel}`,
+      taskType: 'ADVISORY' 
+    })
+  });
+  const data = await res.json();
+  return data.description || data.text || "Attention: Please remain calm and follow staff instructions.";
 }
