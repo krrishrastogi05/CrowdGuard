@@ -46,10 +46,11 @@ const STADIUM_ZONES = [
 ];
 
 // --- MEMOIZED MAP COMPONENT ---
-const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClick, showHeatmap }) => {
+// Added ': any' to props to prevent strict Type errors
+const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClick, showHeatmap }: any) => {
   
-  const getZoneStyle = (zone) => {
-    const activeIncident = incidents.find(i => {
+  const getZoneStyle = (zone: any) => {
+    const activeIncident = incidents.find((i: any) => {
       const incLoc = i.location?.name?.toUpperCase() || "";
       const zoneName = zone.name.toUpperCase();
       return incLoc === zoneName || incLoc.includes(zoneName) || zoneName.includes(incLoc) || i.location?.id === zone.id;
@@ -112,7 +113,7 @@ const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClic
          })}
 
          {/* UNITS LAYER */}
-         {units.map(unit => (
+         {units.map((unit: any) => (
             <g key={unit._id} className="transition-all duration-1000 ease-out" style={{ transform: `translate(${unit.location.x}px, ${unit.location.y}px)` }}>
                <g className="origin-center hover:scale-125 transition-transform cursor-pointer">
                   <rect 
@@ -130,7 +131,7 @@ const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClic
          ))}
 
          {/* INCIDENTS LAYER */}
-         {incidents.map((inc) => (
+         {incidents.map((inc: any) => (
              <g 
                 key={inc._id} 
                 className="cursor-pointer"
@@ -151,8 +152,8 @@ const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClic
   );
 });
 
-const StatusBadge = ({ status }) => {
-    const styles = {
+const StatusBadge = ({ status }: { status: string }) => {
+    const styles: Record<string, string> = {
         CRITICAL: "bg-red-600 text-white border-red-800",
         MODERATE: "bg-orange-100 text-orange-700 border-orange-200",
         WARNING: "bg-orange-100 text-orange-700 border-orange-200",
@@ -192,15 +193,16 @@ const HeatmapLegend = () => (
 );
 
 export default function CrowdGuardProfessional() {
-  const [units, setUnits] = useState([]);
-  const [incidents, setIncidents] = useState([]);
-  const [selectedIncident, setSelectedIncident] = useState(null);
+  // Added <any[]> to prevent 'never[]' type errors during build
+  const [units, setUnits] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isEditMode, setIsEditMode] = useState(false);
   const [spawnType, setSpawnType] = useState('STEWARD');
-  const [recentLogs, setRecentLogs] = useState([]); 
+  const [recentLogs, setRecentLogs] = useState<any[]>([]); 
   const [showHeatmap, setShowHeatmap] = useState(false);
-  const [showReport, setShowReport] = useState(false);
+  const [showReport, setShowReport] = useState<any>(false);
 
   useEffect(() => {
     const styleSheet = document.createElement("style");
@@ -215,14 +217,13 @@ export default function CrowdGuardProfessional() {
     };
     fetchData();
 
-    socket.on('alert', (payload) => {
+    socket.on('alert', (payload: any) => {
        if (payload.type === 'NEW_INCIDENT') {
          setIncidents(prev => [payload.data, ...prev]);
        }
        if (payload.type === 'INCIDENT_UPDATE') {
           setIncidents(prev => prev.map(i => i._id === payload.data._id ? payload.data : i));
-          // FIX: Update selected incident properly with immutable update
-          setSelectedIncident(prevSelected => {
+          setSelectedIncident((prevSelected: any) => {
             if (prevSelected?._id === payload.data._id) {
               return { ...payload.data };
             }
@@ -230,9 +231,9 @@ export default function CrowdGuardProfessional() {
           });
        }
     });
-    socket.on('unit_added', (u) => setUnits(prev => [...prev, u]));
-    socket.on('unit_deleted', (id) => setUnits(prev => prev.filter(u => u._id !== id)));
-    socket.on('unit_update', (u) => setUnits(prev => prev.map(old => old._id === u._id ? u : old)));
+    socket.on('unit_added', (u: any) => setUnits(prev => [...prev, u]));
+    socket.on('unit_deleted', (id: string) => setUnits(prev => prev.filter(u => u._id !== id)));
+    socket.on('unit_update', (u: any) => setUnits(prev => prev.map(old => old._id === u._id ? u : old)));
     socket.on('system_reset', () => { 
       setIncidents([]); 
       setUnits([]); 
@@ -251,7 +252,7 @@ export default function CrowdGuardProfessional() {
     }
   }, []); 
 
-  const handleMapClick = async (e) => {
+  const handleMapClick = async (e: React.MouseEvent) => {
     if (!isEditMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -264,7 +265,7 @@ export default function CrowdGuardProfessional() {
     });
   };
 
-  const handleDeploy = async (unitId, incident) => {
+  const handleDeploy = async (unitId: string, incident: any) => {
     const unitName = units.find(u => u._id === unitId)?.name || "UNIT";
     setRecentLogs(prev => [
         { type: 'DEPLOY', message: `UNIT ${unitName} DEPLOYED TO ${incident.location?.name}`, timestamp: Date.now() },
@@ -276,7 +277,7 @@ export default function CrowdGuardProfessional() {
     ));
     
     if(selectedIncident && selectedIncident._id === incident._id) {
-        setSelectedIncident(prev => ({ ...prev, status: 'DISPATCHED' }));
+        setSelectedIncident((prev: any) => ({ ...prev, status: 'DISPATCHED' }));
     }
     
     await fetch(`${API_URL}/api/units/deploy`, {
@@ -332,7 +333,7 @@ export default function CrowdGuardProfessional() {
       return [...activeIncidents, ...logs];
   }, [incidents, recentLogs]);
 
-  const handleZoneClick = (zone) => {
+  const handleZoneClick = (zone: any) => {
       const found = incidents.find(i => {
            const incLoc = i.location?.name?.toUpperCase() || "";
            const zoneName = zone.name?.toUpperCase() || "";
@@ -341,7 +342,7 @@ export default function CrowdGuardProfessional() {
        if(found) setSelectedIncident({ ...found }); 
   };
 
-  const handleIncidentClick = useCallback((incident) => {
+  const handleIncidentClick = useCallback((incident: any) => {
     setSelectedIncident({ ...incident }); 
   }, []);
 
@@ -419,7 +420,7 @@ export default function CrowdGuardProfessional() {
                               </tr>
                           </thead>
                           <tbody className="divide-y divide-neutral-100">
-                              {units.map(unit => (
+                              {units.map((unit: any) => (
                                   <tr key={unit._id} className="hover:bg-neutral-50 transition group cursor-default">
                                       <td className="px-4 py-3">
                                           <div className="text-xs font-bold text-[#111]">{unit.name}</div>
@@ -575,7 +576,7 @@ export default function CrowdGuardProfessional() {
                       <div>
                           <h3 className="text-xs font-bold text-[#111] uppercase border-b border-neutral-200 pb-2 mb-3">Nearby Resources</h3>
                           <div className="space-y-3">
-                             {units.filter(u => u.status === 'IDLE').slice(0,3).map(u => (
+                             {units.filter((u: any) => u.status === 'IDLE').slice(0,3).map((u: any) => (
                                  <div key={u._id} className="flex justify-between items-center p-3 border border-neutral-200 hover:border-[#111] transition bg-white group cursor-pointer shadow-sm" onClick={() => handleDeploy(u._id, selectedIncident)}>
                                      <div className="flex items-center gap-3">
                                          <div className={`w-3 h-3 rounded-full border border-white shadow-sm ${u.type === 'MEDIC' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
@@ -587,7 +588,7 @@ export default function CrowdGuardProfessional() {
                                      <span className="text-[10px] font-bold uppercase bg-[#111] text-white px-2 py-1 opacity-0 group-hover:opacity-100 transition">Deploy</span>
                                  </div>
                              ))}
-                             {units.filter(u => u.status === 'IDLE').length === 0 && (
+                             {units.filter((u: any) => u.status === 'IDLE').length === 0 && (
                                <div className="text-xs text-neutral-400 italic">No idle units available.</div>
                              )}
                           </div>
@@ -636,7 +637,7 @@ export default function CrowdGuardProfessional() {
                           <div>
                               <h3 className="text-sm font-bold text-[#111] uppercase mb-3">Zone-Specific Analysis</h3>
                               <div className="space-y-3">
-                                  {showReport.zoneAnalysis?.map((zone, idx) => (
+                                  {showReport.zoneAnalysis?.map((zone: any, idx: number) => (
                                       <div key={idx} className="bg-white border border-neutral-200 p-4 rounded-lg shadow-sm">
                                           <div className="flex justify-between items-start mb-2">
                                               <h4 className="font-bold text-neutral-800 text-sm">{zone.zoneName}</h4>
@@ -653,7 +654,7 @@ export default function CrowdGuardProfessional() {
                                   <Target className="w-4 h-4"/> Recommended Actions
                               </h3>
                               <ul className="space-y-2 text-sm">
-                                  {showReport.recommendations?.map((rec, idx) => (
+                                  {showReport.recommendations?.map((rec: string, idx: number) => (
                                       <li key={idx} className="flex items-start gap-2">
                                           <span className="text-purple-400 font-bold">•</span>
                                           <span>{rec}</span>
