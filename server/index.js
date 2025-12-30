@@ -44,9 +44,9 @@ app.use(express.json({ limit: '50mb' }));
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: { 
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: '*',
+  
+  methods: ['GET', 'POST', 'PUT', 'DELETE']
   },
   pingTimeout: 60000,
   pingInterval: 25000
@@ -347,6 +347,11 @@ app.post('/api/reset', async (req, res) => {
   await Unit.deleteMany({});
   io.emit('system_reset');
   res.json({ success: true });
+});
+
+
+app.get('/api/health', (req, res) => {
+  return res.status(200);
 });
 
 // Socket.IO connection handler
