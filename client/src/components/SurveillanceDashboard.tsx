@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  ShieldAlert, Activity, AlertTriangle, 
-  Megaphone, Truck, Radio,
+  ShieldAlert, Activity, 
+  Megaphone, 
   PenTool, X, Target, Clock, PlayCircle, RotateCcw,
-  Flame, Layers, FileText
+  Flame, FileText
 } from 'lucide-react';
 import { API_URL } from '../services/gemini';
 import io from 'socket.io-client';
@@ -206,6 +206,7 @@ export default function CrowdGuardProfessional() {
     const styleSheet = document.createElement("style");
     styleSheet.innerText = fontStyles;
     document.head.appendChild(styleSheet);
+    
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     
     const fetchData = () => {
@@ -240,6 +241,7 @@ export default function CrowdGuardProfessional() {
     });
     
     return () => { 
+        document.head.removeChild(styleSheet);
         clearInterval(timer);
         socket.off('alert'); 
         socket.off('unit_added'); 
@@ -439,7 +441,7 @@ export default function CrowdGuardProfessional() {
                           <div className="p-4 grid grid-cols-2 gap-2">
                                {['STEWARD', 'MEDIC', 'DRONE', 'POLICE'].map(t => (
                                    <button key={t} onClick={() => setSpawnType(t)} className={`text-[9px] font-bold py-3 border rounded shadow-sm hover:shadow-md transition ${spawnType === t ? 'bg-[#111] text-white border-[#111]' : 'bg-white text-neutral-600 border-neutral-300'}`}>
-                                       + {t}
+                                            + {t}
                                    </button>
                                ))}
                           </div>
@@ -460,13 +462,13 @@ export default function CrowdGuardProfessional() {
 
                    <div className="flex-1 relative overflow-hidden" onClick={handleMapClick} style={{ width: '100%' }}>
                        <TechnicalMap 
-                            incidents={incidents} 
-                            units={units}
-                            onZoneClick={handleZoneClick}
-                            onIncidentClick={handleIncidentClick}
-                            showHeatmap={showHeatmap} 
-                        />
-                        {showHeatmap && <HeatmapLegend />}
+                           incidents={incidents} 
+                           units={units}
+                           onZoneClick={handleZoneClick}
+                           onIncidentClick={handleIncidentClick}
+                           showHeatmap={showHeatmap} 
+                       />
+                       {showHeatmap && <HeatmapLegend />}
                    </div>
 
                    {/* FEED RIBBON */}
@@ -578,8 +580,8 @@ export default function CrowdGuardProfessional() {
                                      <div className="flex items-center gap-3">
                                          <div className={`w-3 h-3 rounded-full border border-white shadow-sm ${u.type === 'MEDIC' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
                                          <div>
-                                             <div className="text-sm font-bold text-[#111]">{u.name}</div>
-                                             <div className="text-[9px] font-data text-neutral-400">{u.type} • 2 MIN ETA</div>
+                                            <div className="text-sm font-bold text-[#111]">{u.name}</div>
+                                            <div className="text-[9px] font-data text-neutral-400">{u.type} • 2 MIN ETA</div>
                                          </div>
                                      </div>
                                      <span className="text-[10px] font-bold uppercase bg-[#111] text-white px-2 py-1 opacity-0 group-hover:opacity-100 transition">Deploy</span>

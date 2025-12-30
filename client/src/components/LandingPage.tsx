@@ -6,7 +6,6 @@ import {
   Activity, 
   ShieldAlert, 
   ArrowRight, 
-  Users, 
   AlertTriangle,
   LifeBuoy,
   Map
@@ -49,12 +48,12 @@ const BackgroundLayer = ({ status }) => {
 
        {/* 2. Subtle color overlay that breathes with the status over the blueprint */}
        <motion.div
-          className="absolute inset-0 mix-blend-multiply"
-          animate={{
-            // Very faint red or green tint over the blueprint lines
-            backgroundColor: status === 'danger' ? 'rgba(254, 202, 202, 0.15)' : 'rgba(167, 243, 208, 0.15)',
-          }}
-          transition={{ duration: 4, ease: "easeInOut" }}
+         className="absolute inset-0 mix-blend-multiply"
+         animate={{
+           // Very faint red or green tint over the blueprint lines
+           backgroundColor: status === 'danger' ? 'rgba(254, 202, 202, 0.15)' : 'rgba(167, 243, 208, 0.15)',
+         }}
+         transition={{ duration: 4, ease: "easeInOut" }}
        />
 
        {/* 3. Grain Overlay (Texture) */}
@@ -66,7 +65,7 @@ const BackgroundLayer = ({ status }) => {
   );
 };
 
-// --- COMPONENT: CENTER HERO ANIMATION (Unchanged) ---
+// --- COMPONENT: CENTER HERO ANIMATION ---
 const LifeSavingHero = ({ status }) => {
   return (
     <div className="relative w-full h-[50vh] flex flex-col items-center justify-center z-10">
@@ -155,7 +154,9 @@ export default function AIForGoodPage() {
     const styleSheet = document.createElement("style");
     styleSheet.innerText = fontStyles;
     document.head.appendChild(styleSheet);
-    return () => document.head.removeChild(styleSheet);
+    return () => {
+      document.head.removeChild(styleSheet);
+    };
   }, []);
 
   return (

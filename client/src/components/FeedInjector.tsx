@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, Mic, Camera, Send, MapPin, Activity, ArrowLeft, Target, ChevronDown, ShieldAlert } from 'lucide-react';
+import  { useState, useEffect } from 'react';
+import { Upload, Mic, Camera, Send, MapPin, Activity, ArrowLeft, Target, ShieldAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { analyzeScenario, API_URL } from '../services/gemini';
 
@@ -68,10 +68,15 @@ export default function FeedInjector() {
   const [mode, setMode] = useState<'VISUAL' | 'AUDIO'>('VISUAL');
   const [status, setStatus] = useState('IDLE');
 
-  React.useEffect(() => {
+  useEffect(() => {
     const styleSheet = document.createElement("style");
     styleSheet.innerText = fontStyles;
     document.head.appendChild(styleSheet);
+    
+    // Cleanup function to avoid duplicate styles if component remounts
+    return () => {
+      document.head.removeChild(styleSheet);
+    };
   }, []);
 
   const handleInject = async () => {
@@ -107,8 +112,6 @@ export default function FeedInjector() {
 
   return (
     <div className="min-h-screen bg-[#F5F5F2] text-[#111] font-ui">
-      <style>{fontStyles}</style>
-      
       {/* HEADER */}
       <div className="h-16 bg-white border-b border-neutral-300 flex items-center justify-between px-6">
         <div className="flex items-center gap-6">
@@ -322,4 +325,3 @@ export default function FeedInjector() {
     </div>
   );
 }
-   
