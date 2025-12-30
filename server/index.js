@@ -4,200 +4,361 @@ const express = require('express');
 const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-
 const { Server } = require('socket.io');
 
-// Load Models
-const Incident = require('./models/Incident');
-const ForceUnit = require('./models/ForceUnit');
-const Advisory = require('./models/Advisory');
-
-const app = express();
-const aiLimiter = rateLimit({
-  windowMs: 30 * 60 * 1000, // 15 minutes
-  max: 10, 
-  message: { error: "Too many requests. Please wait 30 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false, 
+// --- MODELS ---
+const IncidentSchema = new mongoose.Schema({
+  type: { type: String, default: "CROWD_ANOMALY" },
+  riskLevel: { type: String, enum: ['SAFE', 'MODERATE', 'CRITICAL'], default: 'SAFE' },
+  densityScore: Number,
+  location: { id: String, name: String, x: Number, y: Number }, 
+  description: String,
+  anomalies: [String],
+  suggestedAction: String,
+  status: { type: String, default: 'ACTIVE' }, 
+  assignedUnit: { type: Object, default: null }, 
+  timestamp: { type: Date, default: Date.now }
 });
+const Incident = mongoose.model('Incident', IncidentSchema);
 
-app.use(cors());
+const UnitSchema = new mongoose.Schema({
+  name: String,
+  type: { type: String, enum: ['STEWARD', 'MEDIC', 'DRONE', 'POLICE'] },
+  status: { type: String, enum: ['IDLE', 'DEPLOYED', 'BUSY'], default: 'IDLE' },
+  location: { x: Number, y: Number }, 
+  assignedIncident: { type: mongoose.Schema.Types.ObjectId, ref: 'Incident' }
+});
+const Unit = mongoose.model('Unit', UnitSchema);
 
-// [FIX 1: Increase Payload Limit for Base64 Images/Audio]
-app.use(express.json({ limit: '50mb' })); 
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// --- SERVER SETUP ---
+const app = express();
+
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE']
+}));
+
+app.use(express.json({ limit: '50mb' }));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { 
+  cors: { 
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000
+});
 
-// [FIX 2: Initialize Gemini Client Correctly]
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/sentinel_db')
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.error("❌ MongoDB Error:", err));
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/aegis_db')
+  .then(() => console.log("✅ AEGIS Database Online"))
+  .catch(err => console.error("❌ DB Error:", err));
 
-// Routes
-app.post('/api/analyze', aiLimiter, async (req, res) => {
+// --- HELPER FUNCTION TO CLEAN JSON FROM AI RESPONSE ---
+function cleanAIResponse(text) {
+  // Remove markdown code blocks
+  let cleaned = text.replace(/``````\n?/g, '');
+  
+  // Remove any leading/trailing whitespace
+  cleaned = cleaned.trim();
+  
+  // Try to find JSON object if there's extra text
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+  
+  return cleaned;
+}
+
+// --- ROUTES ---
+
+// 1. AI ANALYSIS - IMPROVED PROMPT
+app.post('/api/analyze', async (req, res) => {
   try {
-    const { text, fileData, mimeType, taskType } = req.body;
+    const { imageBase64, promptContext, taskType } = req.body;
     
-    // Construct the parts array for Gemini
-    let parts = [];
-    if (text) parts.push({ text });
-    if (fileData) {
-        parts.push({ 
-            inlineData: { 
-                data: fileData, 
-                mimeType: mimeType 
-            } 
-        });
+    let systemInstruction = taskType === 'ADVISORY' 
+        ? `You are AEGIS Public Safety AI. Write a short, urgent 280-character alert based on the context. 
+        
+        Return ONLY valid JSON without any markdown formatting:
+        { "text": "message" }`
+        : `You are AEGIS Crowd Analysis AI specialized in stadium surveillance and threat detection.
+
+**CRITICAL INSTRUCTIONS:**
+1. Analyze the provided CCTV footage/image for crowd anomalies and security threats
+2. Be SPECIFIC about locations - mention exact camera IDs, zones, or landmarks visible in the footage
+3. Describe WHAT you see, WHERE you see it, and WHY it's concerning
+4. Provide ACTIONABLE strategies based on the overall venue layout
+5. Return ONLY valid JSON without any markdown code blocks or extra formatting
+
+**Output Format (MUST be valid JSON only):**
+{
+  "riskLevel": "SAFE"|"MODERATE"|"CRITICAL",
+  "densityScore": 1-10,
+  "description": "Specific description mentioning: 'CCTV Camera [ID/Location] detected [specific threat/anomaly] at [exact location/zone]. Observed [specific details like crowd size, behavior patterns, blocked pathways, etc.]'",
+  "anomalies": ["Specific observable anomaly 1", "Specific observable anomaly 2"],
+  "suggestedAction": "Strategic response considering entire venue: 'Deploy [specific units] to [exact location]. Redirect crowd flow from [overcrowded zone] to [alternative exit/zone]. Activate [specific protocol]. Monitor [related zones] for spillover effects. [Additional venue-wide coordination steps]'"
+}
+
+**Example Good Description:**
+"CCTV Camera NE-07 at North Stands detected severe crowd density (estimated 450+ persons in 200-capacity section). Observed pushing behavior near rows 15-18, multiple individuals stumbling, blocked stairway access at Gate NE exit."
+
+**Example Bad Description (DO NOT DO THIS):**
+"Visual threat detected showing crowd issues"
+
+**Example Good Strategy:**
+"Deploy MEDIC-1 and STEWARD units Alpha & Bravo to North Stands rows 15-20 immediately. Activate emergency announcements directing North Stand occupants to exit via Gate NW (currently at 40% capacity). Close Gate NE entry temporarily. Redirect incoming traffic to East Wing. Position DRONE-1 for aerial crowd flow monitoring between North and East sections. Alert Gate SE and SW staff to prepare for potential crowd redistribution."
+
+**Example Bad Strategy (DO NOT DO THIS):**
+"Deploy units to handle the situation"
+
+IMPORTANT: Return ONLY the JSON object, no markdown formatting, no code blocks, no extra text.`;
+
+    const parts = [
+      { text: systemInstruction }, 
+      { text: `CONTEXT FROM SURVEILLANCE SYSTEM: ${promptContext}` }
+    ];
+    
+    if (imageBase64) {
+      parts.push({ 
+        inlineData: { 
+          data: imageBase64, 
+          mimeType: "image/jpeg" 
+        } 
+      });
     }
 
-    let promptContext = "";
-    
-    if (taskType === 'ADVISORY') {
-        promptContext = `
-            Context: You are ARGUS AI.
-            Incident Details: ${text}
-            Task: Write a single, urgent, professional public safety advisory tweet (max 280 chars).
-            Output: Just the text. No quotes.
-        `;
-    } else {
-        promptContext = `
-            You are ARGUS AI. Analyze the input for disaster management.
-            Output Strict JSON:
-            {
-              "type": "Incident Type",
-              "severity": Number (1-10),
-              "description": "Short summary",
-              "location": { "address": "Approx address", "coordinates": [28.61, 77.20] },
-              "breakdown": {
-                "evidence_source": "Visual/Text",
-                "acoustics": ["List"],
-                "visual_clues": ["List"],
-                "logistics_needed": ["Ambulance", "Fire"]
-              },
-              "action_plan": "Tactical advice."
-            }
-            DO NOT use Markdown. Just raw JSON.
-        `;
-    }
-    
-    parts.push({ text: promptContext });
-
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts }]
+    const result = await model.generateContent({ 
+      contents: [{ role: 'user', parts }] 
     });
     
-    const response = await result.response;
-    const rawText = response.text();
+    const rawText = result.response.text();
+    const cleanedText = cleanAIResponse(rawText);
     
-    if (taskType !== 'ADVISORY') {
-        const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-        res.json(JSON.parse(cleaned));
-    } else {
-        res.json({ text: rawText.trim() });
+    try { 
+      const jsonResponse = JSON.parse(cleanedText);
+      res.json(jsonResponse);
+    } catch (parseError) {
+      console.error("JSON Parse Error:", parseError);
+      console.error("Raw AI Response:", rawText);
+      console.error("Cleaned Text:", cleanedText);
+      
+      // Fallback response
+      res.json({ 
+        text: cleanedText,
+        riskLevel: "MODERATE",
+        densityScore: 5,
+        description: "AI response parsing failed. Manual review required.",
+        anomalies: ["System Error"],
+        suggestedAction: "Review raw surveillance data manually."
+      });
     }
-
-  } catch (err) {
-    console.error("AI Processing Error:", err);
-    res.status(500).json({ error: "AI Analysis Failed", details: err.message });
+  } catch (error) {
+    console.error("AI Analysis Error:", error);
+    res.json({ 
+      riskLevel: "CRITICAL", 
+      densityScore: 9, 
+      description: "AI Offline - Manual Protocol Required. System detected anomaly but cannot process details.", 
+      anomalies: ["AI System Failure"],
+      suggestedAction: "Initiate manual assessment protocol. Deploy nearest available units for visual inspection."
+    });
   }
 });
 
-app.get('/api/data', async (req, res) => {
+// 2. GENERATE OVERALL REPORT - FIXED
+app.post('/api/generate-report', async (req, res) => {
+  const { incidents } = req.body; // Move to outer scope
+  
   try {
-    const [incidents, units, advisories] = await Promise.all([
-      Incident.find().populate('assignedUnit').sort({ timestamp: -1 }).lean(),
-      ForceUnit.find().lean(),
-      Advisory.find().sort({ timestamp: -1 }).limit(50).lean()
+    if (!incidents || incidents.length === 0) {
+      return res.json({
+        executiveSummary: "No active incidents detected. All zones operating within normal parameters.",
+        zoneAnalysis: [],
+        recommendations: ["Continue standard monitoring protocols"]
+      });
+    }
+
+    // Create a summary of incidents for the prompt
+    const incidentSummary = incidents.map(inc => ({
+      zone: inc.location?.name || 'Unknown',
+      risk: inc.riskLevel,
+      density: inc.densityScore,
+      description: inc.description,
+      type: inc.type
+    }));
+
+    const reportPrompt = `You are AEGIS Strategic Command AI. Analyze ALL incidents across the entire venue and provide a comprehensive situational report.
+
+**INCIDENT DATA:**
+${JSON.stringify(incidentSummary, null, 2)}
+
+**STADIUM ZONES REFERENCE:**
+- North Stands
+- South Stands
+- East Wing
+- West Wing
+- Field Play Area
+- Gate NE, Gate NW, Gate SE, Gate SW
+
+**REQUIRED OUTPUT:**
+Return ONLY valid JSON without markdown code blocks or formatting. The JSON must have this exact structure:
+
+{
+  "executiveSummary": "2-3 sentence overview of overall venue status, total incidents, highest risk zones, and general crowd flow status",
+  "zoneAnalysis": [
+    {
+      "zoneName": "Exact zone name from incident data",
+      "status": "CRITICAL or MODERATE or SAFE",
+      "recommendation": "Specific action for this zone considering its relationship to other zones"
+    }
+  ],
+  "recommendations": [
+    "Strategic venue-wide action 1",
+    "Strategic venue-wide action 2",
+    "Resource allocation recommendation"
+  ]
+}
+
+**IMPORTANT GUIDELINES:**
+- Consider how incidents in one zone affect others
+- Recommend crowd redistribution from overcrowded zones to underutilized ones
+- Think about the entire venue as a connected system
+- Be specific about which gates to use for redirections
+- Return ONLY the JSON object, no markdown, no code blocks, no extra text`;
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: reportPrompt }] }]
+    });
+
+    const rawText = result.response.text();
+    const cleanedText = cleanAIResponse(rawText);
+    
+    console.log("📊 Raw Report Response:", rawText.substring(0, 200) + "...");
+    console.log("🧹 Cleaned Report:", cleanedText.substring(0, 200) + "...");
+    
+    try {
+      const report = JSON.parse(cleanedText);
+      res.json(report);
+    } catch (parseError) {
+      console.error("Report JSON Parse Error:", parseError);
+      console.error("Cleaned Text:", cleanedText);
+      
+      // Fallback report
+      throw parseError; // Will be caught by outer catch
+    }
+    
+  } catch (error) {
+    console.error("Report Generation Error:", error);
+    
+    // Fallback report using the incidents variable (now in scope)
+    res.json({
+      executiveSummary: `Report generation encountered an error. ${incidents.length} active incidents detected across venue requiring manual assessment.`,
+      zoneAnalysis: incidents.map(inc => ({
+        zoneName: inc.location?.name || "Unknown Zone",
+        status: inc.riskLevel || "MODERATE",
+        recommendation: `Manual assessment required for ${inc.location?.name}. Density score: ${inc.densityScore}/10. Current status: ${inc.status}.`
+      })),
+      recommendations: [
+        "Review all active incidents manually via the dashboard",
+        "Deploy available units to highest risk zones first",
+        "Monitor real-time CCTV feeds for the affected areas",
+        "Prepare backup evacuation routes if crowd density increases"
+      ]
+    });
+  }
+});
+
+// 3. INCIDENTS
+app.post('/api/incidents', async (req, res) => {
+  const incident = await Incident.create(req.body);
+  io.emit('alert', { type: 'NEW_INCIDENT', data: incident });
+  res.json(incident);
+});
+
+app.get('/api/incidents', async (req, res) => {
+  const incidents = await Incident.find({ status: { $ne: 'RESOLVED' } }).sort({ timestamp: -1 });
+  res.json(incidents);
+});
+
+// 4. UNITS (CRUD)
+app.get('/api/units', async (req, res) => {
+  let units = await Unit.find();
+  if(units.length === 0) {
+    units = await Unit.insertMany([
+        { name: "Alpha", type: "STEWARD", location: { x: 15, y: 15 } },
+        { name: "Bravo", type: "STEWARD", location: { x: 85, y: 85 } },
+        { name: "Medic-1", type: "MEDIC", location: { x: 50, y: 90 } },
+        { name: "Drone-1", type: "DRONE", location: { x: 50, y: 50 } }
     ]);
-    res.json({ incidents, units, advisories });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  }
+  res.json(units);
 });
 
 app.post('/api/units', async (req, res) => {
-  const unit = await ForceUnit.create(req.body);
-  io.emit('units_updated', await ForceUnit.find());
+  const unit = await Unit.create(req.body);
+  io.emit('unit_added', unit);
   res.json(unit);
 });
 
-app.post('/api/deploy', async (req, res) => {
-  const { incidentId, unitId } = req.body;
-  const incident = await Incident.findByIdAndUpdate(incidentId, { status: 'DISPATCHED', assignedUnit: unitId }, { new: true }).populate('assignedUnit');
-  await ForceUnit.findByIdAndUpdate(unitId, { status: 'BUSY' });
-  
-  const incidents = await Incident.find().populate('assignedUnit').sort({ timestamp: -1 });
-  const units = await ForceUnit.find();
-  
-  io.emit('incident_alert', { incidents, units, newIncident: incident });
+app.delete('/api/units/:id', async (req, res) => {
+  await Unit.findByIdAndDelete(req.params.id);
+  io.emit('unit_deleted', req.params.id);
   res.json({ success: true });
 });
 
-app.post('/api/incident', async (req, res) => {
-  try {
-    const { type, description, severity, location, breakdown, action_plan } = req.body;
-    const newIncident = new Incident({ type, description, severity, location, breakdown, action_plan, status: 'PENDING', assignedUnit: null });
-    await newIncident.save();
-
-    const fullList = await Incident.find().populate('assignedUnit').sort({ timestamp: -1 });
-    const fullUnits = await ForceUnit.find();
-    
-    io.emit('incident_alert', { incidents: fullList, units: fullUnits, newIncident: newIncident });
-    res.json({ success: true, incident: newIncident });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+// DEPLOY UNIT
+app.post('/api/units/deploy', async (req, res) => {
+  const { unitId, targetX, targetY, incidentId } = req.body;
+  
+  const unit = await Unit.findByIdAndUpdate(
+    unitId, 
+    { 
+      status: 'DEPLOYED', 
+      location: { x: targetX, y: targetY }, 
+      assignedIncident: incidentId 
+    }, 
+    { new: true }
+  );
+  
+  io.emit('unit_update', unit);
+  
+  if (incidentId) {
+     const incident = await Incident.findByIdAndUpdate(
+       incidentId, 
+       { 
+         status: 'DISPATCHED', 
+         assignedUnit: unit 
+       }, 
+       { new: true }
+     );
+     io.emit('alert', { type: 'INCIDENT_UPDATE', data: incident });
   }
+  
+  res.json(unit);
 });
 
-app.post('/api/advisory', async (req, res) => {
-  try {
-    const { message } = req.body;
-    const newAdvisory = new Advisory({ message });
-    await newAdvisory.save();
-    
-    io.emit('advisory_posted', newAdvisory);
-    res.json({ success: true, advisory: newAdvisory });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// --- UPDATED CLEAR ROUTE WITH SECURITY CHECK ---
-app.delete('/api/clear', async (req, res) => {
-  // Get key from header
-  const clientKey = req.headers['x-admin-key'];
-  const serverKey = process.env.ADMIN_KEY; // Ensure you set ADMIN_KEY in .env
-
-  if (!serverKey) {
-    console.warn("⚠️ SECURITY WARNING: ADMIN_KEY not set in .env. Denying all reset requests.");
-    return res.status(500).json({ error: "Server misconfiguration" });
-  }
-
-  if (clientKey !== serverKey) {
-    console.log("❌ Unauthorized reset attempt. Invalid Key.");
-    return res.status(403).json({ error: "Invalid Admin Key" });
-  }
-
-  // If Key Matches: Proceed
+// 5. RESET
+app.post('/api/reset', async (req, res) => {
   await Incident.deleteMany({});
-  await ForceUnit.updateMany({}, { status: 'IDLE' });
-  await Advisory.deleteMany({}); 
-  
-  io.emit('incident_alert', { incidents: [], units: await ForceUnit.find(), newIncident: null });
-  io.emit('advisories_cleared'); 
-  
+  await Unit.deleteMany({});
+  io.emit('system_reset');
   res.json({ success: true });
 });
-// ----------------------------------------------
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
+
+// Socket.IO connection handler
+io.on('connection', (socket) => {
+  console.log('✅ Client connected:', socket.id);
+  
+  socket.on('disconnect', () => {
+    console.log('❌ Client disconnected:', socket.id);
+  });
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Aegis Backend Active on Port ${PORT}`));
