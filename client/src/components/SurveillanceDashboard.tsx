@@ -87,7 +87,7 @@ const TechnicalMap = React.memo(({ incidents, units, onZoneClick, onIncidentClic
               <path d="M 2 0 L 0 0 0 2" fill="none" stroke="gray" strokeWidth="0.1" opacity="0.2"/>
             </pattern>
          </defs>
-         <rect width="100" height="100" fill="url(#smallGrid)" opacity={showHeatmap ? 0.1 : 0} transition="opacity 0.5s" />
+         <rect width="100" height="100" fill="url(#smallGrid)" opacity={showHeatmap ? 0.1 : 0} style={{ transition: "opacity 0.5s" }}/>
 
          {/* Zones */}
          {STADIUM_ZONES.map(zone => {
